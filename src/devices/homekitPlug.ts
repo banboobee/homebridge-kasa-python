@@ -44,7 +44,8 @@ export default class HomeKitDevicePlug extends HomeKitDevice {
     // On characteristic handler
     const On = outlet?.getCharacteristic(Characteristic.On);
     On?.on('change', async (event) => {
-      if (event.newValue !== event.oldValue && event.reason === 'write') {
+      if (event.newValue !== event.oldValue) {
+        const accessory = this.homebridgeAccessory;
         accessory.context.lastActivation = Math.round(new Date().valueOf() / 1000);
         this.historyService?.addEntry({
           time: accessory.context.lastActivation,
@@ -65,11 +66,23 @@ export default class HomeKitDevicePlug extends HomeKitDevice {
     );
 
     if (this.kasaDevice.feature_info.energy || this.kasaDevice.sys_info.energy) {
-      const Watts = outlet?.getCharacteristic(eve.Characteristics.Consumption);
-      Watts?.on('change', async (event) => {
+      accessory.context.totalConsumption ??= 0;
+      const totalConsumption = eve.Characteristics.TotalConsumption;
+      outlet?.addOptionalCharacteristic(totalConsumption);
+      outlet?.getCharacteristic(totalConsumption).onGet(() => {
+        const accessory = this.homebridgeAccessory;
+        return accessory.context.totalConsumption ?? 0;
+      });
+
+      this.updateEmitter.on('updateComplete', () => {
+        const accessory = this.homebridgeAccessory;
+        const power = this.kasaDevice?.sys_info?.energy?.power;
+        const interval = this.platform.config.discoveryOptions.pollingInterval / 1000;
+        const watts = power ? power / 3600 * interval: 0;
+        accessory.context.totalConsumption! += watts;
         this.historyService?.addEntry({
           time: Math.round(new Date().valueOf() / 1000),
-          power: event.newValue,
+          power: watts,
         });
       });
     } else {

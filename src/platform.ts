@@ -44,6 +44,7 @@ export type KasaPythonAccessoryContext = {
   lastSeen?: Date;
   offline?: boolean;
   lastActivation?: number;
+  totalConsumption?: number;
 };
 
 let packageConfig: { name: string; version: string; engines: { node: string } };
