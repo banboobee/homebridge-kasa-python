@@ -71,7 +71,8 @@ export default class HomeKitDevicePlug extends HomeKitDevice {
       outlet?.addOptionalCharacteristic(totalConsumption);
       outlet?.getCharacteristic(totalConsumption).onGet(() => {
         const accessory = this.homebridgeAccessory;
-        return accessory.context.totalConsumption ?? 0;
+	const totalConsumption = accessory.context.totalConsumption ?? 0;
+        return totalConsumption / 1000;
       });
 
       this.updateEmitter.on('updateComplete', () => {
