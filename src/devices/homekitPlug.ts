@@ -23,9 +23,38 @@ export default class HomeKitDevicePlug extends HomeKitDevice {
   }
 
   private setupEveHistoryService () : void {
-    const {Characteristic, Service, api, eve} = this.platform;
+    const { Characteristic, Service, api, eve } = this.platform;
     const accessory = this.homebridgeAccessory;
-    const outlet = accessory.getService(Service.Outlet);;
+    const outlet = accessory.getService(Service.Outlet);
+
+    if (!this.platform.config.energyOptions.enableEveHistoryView) {
+      // cached accessory to be restored if disabled.
+      [
+        eve.Services.Consumption,
+      ].forEach((x) => {
+        const s = accessory.getService(x);
+        if (s) {
+          accessory.removeService(s);
+        }
+      });
+      [
+        eve.Characteristics.LastActivation,
+        Characteristic.LockPhysicalControls,
+        eve.Characteristics.TotalConsumption,
+        eve.Characteristics.ResetTotal,
+      ].forEach((x) => {
+        if (outlet?.testCharacteristic(x)) {
+          const c = outlet?.getCharacteristic(x);
+          outlet.removeCharacteristic(c);
+        }
+      });
+      delete(accessory.context.lastActivation);
+      delete(accessory.context.totalConsumption);
+
+      return;
+    }
+
+    // open event stream
     this.historyService = new this.platform.HistoryService(
       'custom', accessory, { storage: 'fs' },
     );
@@ -41,7 +70,7 @@ export default class HomeKitDevicePlug extends HomeKitDevice {
       return lastTime;
     });
 
-    // On characteristic handler
+    // logging on/off status
     const On = outlet?.getCharacteristic(Characteristic.On);
     On?.on('change', async (event) => {
       if (event.newValue !== event.oldValue) {
@@ -65,16 +94,43 @@ export default class HomeKitDevicePlug extends HomeKitDevice {
       Characteristic.LockPhysicalControls.CONTROL_LOCK_ENABLED,
     );
 
-    if (this.kasaDevice.feature_info.energy || this.kasaDevice.sys_info.energy) {
+    if (this.platform.config.energyOptions.enableEnergyMonitoring &&
+	this.platform.energyCharacteristics &&
+	(this.kasaDevice.feature_info.energy || this.kasaDevice.sys_info.energy)) {
+      // dummy consumption service to be removed if previously configured
+      [
+        eve.Services.Consumption,
+      ].forEach((x) => {
+        const s = accessory.getService(x);
+        if (s) {
+          accessory.removeService(s);
+        }
+      });
+
+      // totalConsumption characteristic
       accessory.context.totalConsumption ??= 0;
       const totalConsumption = eve.Characteristics.TotalConsumption;
       outlet?.addOptionalCharacteristic(totalConsumption);
       outlet?.getCharacteristic(totalConsumption).onGet(() => {
         const accessory = this.homebridgeAccessory;
-	const totalConsumption = accessory.context.totalConsumption ?? 0;
+        const totalConsumption = accessory.context.totalConsumption ?? 0;
         return totalConsumption / 1000;
       });
 
+      // resetTotal characteristic
+      const resetTotal = eve.Characteristics.ResetTotal;
+      outlet?.addOptionalCharacteristic(resetTotal);
+      outlet?.getCharacteristic(resetTotal)
+        .onSet((_reset) => {
+          const accessory = this.homebridgeAccessory;
+          accessory.context.totalConsumption = 0;
+        })
+        // .onGet(() => {
+        //   return this.historyService.getInitialTime() - Math.round(Date.parse('01 Jan 2001 00:00:00 GMT')/1000);
+        // })
+      ;
+
+      // logging power
       this.updateEmitter.on('updateComplete', () => {
         const accessory = this.homebridgeAccessory;
         const power = this.kasaDevice?.sys_info?.energy?.power;
@@ -87,7 +143,19 @@ export default class HomeKitDevicePlug extends HomeKitDevice {
         });
       });
     } else {
-      // dummy consumption service with TotalConsumption characteristic
+      // totalConsumption characteristic to be removed if previously configured
+      [
+        eve.Characteristics.TotalConsumption,
+        eve.Characteristics.ResetTotal,
+      ].forEach((x) => {
+        if (outlet?.testCharacteristic(x)) {
+          const c = outlet?.getCharacteristic(x);
+          outlet.removeCharacteristic(c);
+        }
+      });
+      delete(accessory.context.totalConsumption);
+
+      // dummy consumption service to enable switching history
       const dummy =
         accessory.getService(eve.Services.Consumption) ??
         accessory.addService(eve.Services.Consumption, `${this.name} Consumption`);
